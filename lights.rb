@@ -3,18 +3,39 @@ require 'net/http'
 require 'json'
 require 'rainbow'
 
-# user: 783
+def parse_payload(chunk)
+  payload = JSON.parse(chunk[6..-1])
+  message = payload["text"]
+  message.split("&")
+end
 
-arduino = ArduinoFirmata.connect
-last_submission_id = nil
+def lightup(arduino, passed)
+  color = passed ? :green : :red
+  print Rainbow("\u25CF ").bright.send(color)
 
+  2.times do 
+    arduino.digital_write PINS[color], true
+    sleep 1
+    arduino.digital_write PINS[color], false
+    sleep 1
+  end
+end
+
+PINS = {
+  green: 7,
+  red:   8
+}
+
+arduino  = ArduinoFirmata.connect
+last_sid = nil
+
+# ie. user: 783
 print Rainbow("What's your Learn user ID?: ").bright
 
 uid = gets.chomp
 uri = URI("https://push.flatironschool.com:9443/ev/fis-user-#{uid}")
 
 puts "Go forth and learn!"
-puts ""
 
 Net::HTTP.start(uri.host, uri.port, use_ssl: true) do |http|
   request = Net::HTTP::Get.new uri
@@ -23,29 +44,18 @@ Net::HTTP.start(uri.host, uri.port, use_ssl: true) do |http|
     begin
       response.read_body do |chunk|
         if chunk.include?("submission_id")
-          payload       = JSON.parse(chunk[6..-1])
-          message       = payload["text"]
-          params        = message.split("&")
-          submission_id = params.find { |param| param.include? "submission_id" }.tap do |param|
-            param.split("=").first
+          params = parse_payload(chunk)
+          sid    = params.find { |param| param.include? "submission_id" }.tap do |param|
+            param.split("=").last
           end
-          passed        = params.find { |param| param.include? "passing" }.tap do |param|
-            param.split("=").first == "true"
-          end
+          passed = params.find { |param| param.include? "passing=true" }
 
-          if last_submission_id != submission_id
-            if passed
-              print Rainbow("\u25CF ").bright.green
-              arduino.digital_write 13, true
-              sleep 2
-              arduino.digital_write 13, false
-            else
-              print Rainbow("\u25CF ").bright.red
-            end
+          if last_sid != sid
+            lightup(arduino, passed)
           end
-
-          last_submission_id = submission_id
         end
+
+        last_sid = sid
       end
     rescue Interrupt
       puts "Bye!"
