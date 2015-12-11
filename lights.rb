@@ -3,63 +3,79 @@ require 'net/http'
 require 'json'
 require 'rainbow'
 
-def parse_payload(chunk)
-  payload = JSON.parse(chunk[6..-1])
-  message = payload["text"]
-  message.split("&")
-end
+class Lights
+  PINS = {
+    green: 7,
+    red:   8
+  }
 
-def lightup(arduino, passed)
-  color = passed ? :green : :red
-  print Rainbow("\u25CF ").bright.send(color)
-
-  2.times do 
-    arduino.digital_write PINS[color], true
-    sleep 1
-    arduino.digital_write PINS[color], false
-    sleep 1
+  def initialize(arduino, display)
+    @arduino = arduino
+    @display = display
   end
-end
 
-PINS = {
-  green: 7,
-  red:   8
-}
+  def setup
+    # ie. user: 783
+    print Rainbow("What's your Learn user ID?: ").bright
 
-arduino  = ArduinoFirmata.connect
-last_sid = nil
+    @uid = gets.chomp
+    @uri = URI("https://push.flatironschool.com:9443/ev/fis-user-#{@uid}")
 
-# ie. user: 783
-print Rainbow("What's your Learn user ID?: ").bright
+    puts "Go forth and learn!"
+  end
 
-uid = gets.chomp
-uri = URI("https://push.flatironschool.com:9443/ev/fis-user-#{uid}")
+  def run
+    Net::HTTP.start(@uri.host, @uri.port, use_ssl: true) do |http|
+      request  = Net::HTTP::Get.new(@uri)
+      last_sid = nil
 
-puts "Go forth and learn!"
+      http.request(request) do |response|
+        response.read_body do |chunk|
+          # We're only looking for submissions
+          if chunk.include?("submission_id")
+            params = parse_payload(chunk)
+            sid    = params.find { |param| param.include? "submission_id" }.tap do |param|
+              param.split("=").last
+            end
+            passed = params.find { |param| param.include? "passing=true" }
 
-Net::HTTP.start(uri.host, uri.port, use_ssl: true) do |http|
-  request = Net::HTTP::Get.new uri
-
-  http.request(request) do |response|
-    begin
-      response.read_body do |chunk|
-        if chunk.include?("submission_id")
-          params = parse_payload(chunk)
-          sid    = params.find { |param| param.include? "submission_id" }.tap do |param|
-            param.split("=").last
+            if last_sid != sid
+              lightup(passed)
+            end
           end
-          passed = params.find { |param| param.include? "passing=true" }
 
-          if last_sid != sid
-            lightup(arduino, passed)
-          end
+          last_sid = sid
         end
-
-        last_sid = sid
       end
-    rescue Interrupt
-      puts "Bye!"
-      exit 0
     end
   end
+
+  private
+
+  def parse_payload(chunk)
+    payload = JSON.parse(chunk[6..-1])
+    message = payload["text"]
+    message.split("&")
+  end
+
+  def lightup(passed)
+    color = passed ? :green : :red
+
+    @display.print Rainbow("\u25CF ").bright.send(color)
+    @arduino.digital_write PINS[color], true
+    sleep 5
+    @arduino.digital_write PINS[color], false
+  end
+end
+
+arduino = ArduinoFirmata.connect
+lights  = Lights.new(arduino, STDOUT)
+
+lights.setup
+
+begin
+  lights.run
+rescue Interrupt
+  puts "Bye!"
+  exit 0
 end
