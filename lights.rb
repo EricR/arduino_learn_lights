@@ -16,12 +16,12 @@ class Lights
 
   def setup
     # ie. user: 783
-    print Rainbow("What's your Learn user ID?: ").bright
+    @display.print Rainbow("What's your Learn user ID?: ").bright
 
     @uid = gets.chomp
     @uri = URI("https://push.flatironschool.com:9443/ev/fis-user-#{@uid}")
 
-    puts "Go forth and learn!"
+    @display.puts "Go forth and learn!"
   end
 
   def run
